@@ -1,8 +1,8 @@
-# 04 · Νέα endpoints & frontend controls
+# 04 — Νέα endpoints και frontend controls
 
-## `GET /export/:afm` — CSV/Excel (το κουμπί ήταν σπασμένο)
+## GET /export/:afm — εξαγωγή CSV/Excel
 
-Το frontend καλούσε `${API}/export/:afm?format=csv`, αλλά **δεν υπήρχε τέτοιο route** → 404. Ο κώδικας για CSV (`toCsv`) υπήρχε αλλά δεν ήταν συνδεδεμένος. Wiring:
+Το frontend καλούσε `${API}/export/:afm?format=csv`, αλλά δεν υπήρχε αντίστοιχο route (404). Η συνάρτηση `toCsv` υπήρχε αλλά δεν ήταν συνδεδεμένη.
 
 ```js
 app.get("/export/:afm", async (request, response) => {
@@ -18,7 +18,7 @@ app.get("/export/:afm", async (request, response) => {
     if (format === "csv") {
       response.setHeader("Content-Type", "text/csv; charset=utf-8");
       response.setHeader("Content-Disposition", `attachment; filename="decisions_${afm}.csv"`);
-      return response.send(toCsv(result));   // περιλαμβάνει BOM για σωστά ελληνικά στο Excel
+      return response.send(toCsv(result));   // περιλαμβάνει BOM για σωστή απόδοση ελληνικών στο Excel
     }
     response.status(400).json({ error: `Άγνωστη μορφή εξαγωγής: ${format}` });
   } catch (error) {
@@ -28,7 +28,7 @@ app.get("/export/:afm", async (request, response) => {
 });
 ```
 
-## `GET /types/:afm` — τύποι απόφασης για το dropdown
+## GET /types/:afm — τύποι απόφασης
 
 ```js
 export async function getDecisionTypes(organizationUid) {
@@ -39,7 +39,7 @@ export async function getDecisionTypes(organizationUid) {
 }
 ```
 
-Στο frontend, το ελεύθερο κείμενο «Τύπος» έγινε **dropdown** που γεμίζει όταν επιλέγεις φορέα:
+Στο frontend, το ελεύθερο κείμενο για τον τύπο αντικαταστάθηκε με dropdown που γεμίζει κατά την επιλογή φορέα:
 
 ```jsx
 <select value={filters.type || ""} onChange={(e) => setFilter("type", e.target.value)}
@@ -49,14 +49,14 @@ export async function getDecisionTypes(organizationUid) {
 </select>
 ```
 
-## `GET /refresh/:afm` — χειροκίνητο incremental refresh
+## GET /refresh/:afm — incremental refresh
 
 ```js
 app.get("/refresh/:afm", async (request, response) => {
   const afm = request.params.afm;
   try {
     const latest = await getLatestTimestamp(afm);
-    const incremental = latest !== null;   // υπάρχει ήδη → μόνο νέες πράξεις
+    const incremental = latest !== null;   // υπάρχει ήδη: μόνο νέες πράξεις
     await collectAllSemesters(afm, { incremental });
     response.json({ status: "refreshed", incremental });
   } catch (error) {
@@ -66,9 +66,9 @@ app.get("/refresh/:afm", async (request, response) => {
 });
 ```
 
-Και το κουμπί «↻ Ανανέωση» που, μετά το refresh, ξαναφορτώνει τύπους + ανάλυση ώστε να φανούν αμέσως οι νέες πράξεις.
+Το αντίστοιχο κουμπί, μετά το refresh, ξαναφορτώνει τύπους και ανάλυση ώστε να εμφανιστούν οι νέες πράξεις.
 
 ## Καθαρισμός
 
-- Αφαιρέθηκε το **νεκρό** φίλτρο «Ρόλος» από το UI: βασιζόταν στο `organizationAfm`, που **δεν συμπληρωνόταν ποτέ** (πάντα `"-"`), άρα δεν έκανε τίποτα.
-- Αφαιρέθηκε ένα αχρησιμοποίητο `import` που έμεινε μετά τη μετάβαση στο aggregation.
+- Αφαιρέθηκε ανενεργό φίλτρο ρόλου από το UI: βασιζόταν στο `organizationAfm`, το οποίο δεν συμπληρωνόταν ποτέ (πάντα `"-"`).
+- Αφαιρέθηκε αχρησιμοποίητο import που παρέμεινε μετά τη μετάβαση στο aggregation.

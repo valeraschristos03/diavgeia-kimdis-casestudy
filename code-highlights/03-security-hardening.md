@@ -1,24 +1,24 @@
-# 03 · Ασφάλεια & robustness
+# 03 — Ασφάλεια και ανθεκτικότητα
 
-## 1. Regex-injection / ReDoS
+## Regex injection / ReDoS
 
-**Πριν** — η αναζήτηση φορέα έβαζε **raw λέξεις χρήστη** σε Mongo `$regex`:
+Πριν, η αναζήτηση φορέα τοποθετούσε μη ελεγμένες λέξεις χρήστη σε Mongo `$regex`:
 
 ```js
 const conditions = words.map((w) => ({
-  label: { $regex: w, $options: "i" },   // ← w = ό,τι πληκτρολογήσει ο χρήστης
+  label: { $regex: w, $options: "i" },
 }));
 ```
 
-Και το reverse-lookup ΑΔΑΜ ένωνε **μη ελεγμένα** strings (κάποια από εξωτερικό API):
+Το reverse lookup ΑΔΑΜ ένωνε επίσης μη ελεγμένα strings, ορισμένα από εξωτερικό API:
 
 ```js
 .find({ subject: { $regex: adams.join("|") } })
 ```
 
-**Κίνδυνος:** ένα input όπως `(a+)+` ή `(.*a){20}` προκαλεί *catastrophic backtracking* → η βάση καίει CPU (ReDoS). Επίσης χαρακτήρες όπως `.` `*` `(` αλλάζουν το νόημα της αναζήτησης (regex-injection).
+Είσοδος όπως `(a+)+` ή `(.*a){20}` μπορεί να προκαλέσει catastrophic backtracking (ReDoS). Επιπλέον, χαρακτήρες όπως `.`, `*`, `(` αλλάζουν τη σημασία της αναζήτησης (regex injection).
 
-**Μετά** — escaping σε κάθε σημείο:
+Μετά, με escaping σε κάθε σημείο:
 
 ```js
 function escapeRegex(text) {
@@ -28,14 +28,14 @@ function escapeRegex(text) {
 // αναζήτηση φορέα
 label: { $regex: escapeRegex(w), $options: "i" }
 
-// reverse-lookup ΑΔΑΜ
+// reverse lookup ΑΔΑΜ
 const pattern = adams.map(escapeRegex).join("|");
 .find({ subject: { $regex: pattern } })
 ```
 
-## 2. Τα σφάλματα δεν κρύβονται πια πίσω από 404
+## Χειρισμός σφαλμάτων
 
-**Πριν** — ένα γενικό `catch` μετέτρεπε **κάθε** αποτυχία σε «δεν βρέθηκαν δεδομένα»:
+Πριν, ένα γενικό `catch` μετέτρεπε κάθε αποτυχία σε 404:
 
 ```js
 } catch (error) {
@@ -43,9 +43,9 @@ const pattern = adams.map(escapeRegex).join("|");
 }
 ```
 
-Αν έπεφτε η βάση, ο χρήστης έβλεπε «κενό» — και ο developer δεν είχε ίχνος.
+Σε πτώση της βάσης, ο χρήστης έβλεπε κενό αποτέλεσμα και δεν υπήρχε ίχνος για διάγνωση.
 
-**Μετά** — καθαρός διαχωρισμός:
+Μετά, με διαχωρισμό των περιπτώσεων:
 
 ```js
 try {
@@ -55,26 +55,23 @@ try {
   }
   response.json(stats);
 } catch (error) {
-  console.error(`stats ${afm} ΣΦΑΛΜΑ:`, error);     // ίχνος για διάγνωση
+  console.error(`stats ${afm} ΣΦΑΛΜΑ:`, error);
   response.status(500).json({ error: "Σφάλμα κατά τον υπολογισμό στατιστικών" });
 }
 ```
 
-- `404` → όντως κενό
-- `500` → πραγματικό σφάλμα (με log)
+- 404: κενό αποτέλεσμα.
+- 500: πραγματικό σφάλμα, με καταγραφή.
 
-## 3. Μυστικά εκτός git
+## Μυστικά εκτός version control
 
-Το `backend/.env` περιέχει το ζωντανό `MONGO_URI`. Αποκλείστηκε ρητά:
+Το `backend/.env` περιέχει το `MONGO_URI` και αποκλείστηκε:
 
 ```gitignore
-# --- secrets (ΠΟΤΕ στο git) ---
 .env
 .env.*
 !.env.example
 backend/.env
 ```
 
-και δόθηκε `.env.example` με placeholder αντί για την πραγματική τιμή.
-
-> **Επαλήθευση πριν το πρώτο commit:** έγινε ρητός έλεγχος ότι κανένα `.env`, dataset ή `node_modules` δεν μπήκε στο index — πριν φύγει οτιδήποτε προς το GitHub.
+Προστέθηκε `.env.example` με placeholder. Πριν το πρώτο commit επιβεβαιώθηκε ρητά ότι κανένα `.env`, dataset ή `node_modules` δεν συμπεριλήφθηκε στο index.

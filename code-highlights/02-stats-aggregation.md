@@ -1,14 +1,14 @@
-# 02 · Στατιστικά μέσω Mongo aggregation
+# 02 — Στατιστικά μέσω Mongo aggregation
 
-## Το πρόβλημα
+## Πρόβλημα
 
-`GET /stats/:afm` έφερνε **όλες** τις πράξεις του φορέα στη μνήμη του Node (~45.000 για μεγάλους φορείς), τις `normalize`-άριζε, φιλτράριζε και υπολόγιζε — σε **κάθε** κλήση. Ακριβό και μη κλιμακώσιμο.
+Το `GET /stats/:afm` έφερνε όλες τις πράξεις του φορέα στη μνήμη του Node (έως περίπου 45.000 για μεγάλους φορείς), τις κανονικοποιούσε, φιλτράριζε και υπολόγιζε σε κάθε κλήση.
 
-## Η λύση
+## Λύση
 
-Υπολογισμός **μέσα στη MongoDB** με ένα `$facet` pipeline. Το ποσό υπολογίζεται inline με `$switch`, με **ίδια ακριβώς λογική** με τη `extractCounterparty` του normalizer.
+Ο υπολογισμός μεταφέρθηκε στη MongoDB με `$facet` pipeline. Το ποσό υπολογίζεται inline με `$switch`, με την ίδια λογική που εφαρμόζει η `extractCounterparty` του normalizer.
 
-### 1. Το ποσό inline (η καρδιά)
+### Υπολογισμός ποσού
 
 ```js
 const AMOUNT_EXPR = {
@@ -28,25 +28,23 @@ const AMOUNT_EXPR = {
 };
 ```
 
-### 2. Η παγίδα που έπιασε μόνο η πραγματική Mongo
+### Χειρισμός μη ομοιόμορφων σχημάτων
 
-Πρώτη εκτέλεση → crash:
+Η πρώτη εκτέλεση απέτυχε:
 
 ```
 MongoServerError: The argument to $size must be an array, but was of type: object
 ```
 
-Γιατί; Τα raw πεδία **δεν είναι πάντα πίνακες**:
+Τα raw πεδία δεν είναι πάντοτε πίνακες:
 
 ```
-sponsor        →  array 1.450 |  null 4.069
-person         →  array    33 |  null   11  |  ΣΚΕΤΟ object 15   ← ο ένοχος
-amountWithKae   →  array 2.452 |  null    3
+sponsor       — array 1.450 | null 4.069
+person        — array    33 | null   11 | object 15
+amountWithKae — array 2.452 | null    3
 ```
 
-Το `person` μερικές φορές είναι σκέτο `{ afm, name }`. Στο JS το `efv.person.length` απλώς βγαίνει `undefined` (falsy) και ο κλάδος προσπερνιέται — αλλά το Mongo `$size` **σκάει**.
-
-**Fix:** κάθε `$size` προστατεύεται με `$isArray`, ώστε non-array → μέγεθος 0 (ίδια συμπεριφορά με το `x && x.length > 0`):
+Το `person` εμφανίζεται ενίοτε ως μεμονωμένο `{ afm, name }`. Στο JavaScript το `efv.person.length` προκύπτει `undefined` και ο κλάδος προσπερνιέται, αλλά ο τελεστής `$size` απαιτεί πίνακα. Κάθε `$size` προστατεύεται με `$isArray`, ώστε non-array να αντιστοιχεί σε μέγεθος 0 (ίδια συμπεριφορά με τον έλεγχο `x && x.length > 0`):
 
 ```js
 const arraySize = (path) => ({ $cond: [{ $isArray: path }, { $size: path }, 0] });
@@ -54,7 +52,7 @@ const hasItems  = (path) => ({ $gt: [arraySize(path), 0] });
 const hasField  = (path) => ({ $ne: [{ $ifNull: [path, null] }, null] });
 ```
 
-### 3. Στατιστικά με `$facet`
+### Στατιστικά με `$facet`
 
 ```js
 { $facet: {
@@ -66,7 +64,7 @@ const hasField  = (path) => ({ $ne: [{ $ifNull: [path, null] }, null] });
                   min: { $min: "$_amt" }, max: { $max: "$_amt" }, arr: { $push: "$_amt" } } },
       { $project: { sum:1, count:1, min:1, max:1,
           average: { $cond: [{ $gt: ["$count", 0] }, { $divide: ["$sum", "$count"] }, 0] },
-          median:  /* $let με βάση το count: μεσαίο ή μέσος δύο μεσαίων */ }},
+          median:  /* $let με βάση το count: μεσαίο στοιχείο ή μέσος των δύο μεσαίων */ }},
     ],
     topSponsors: [
       { $match: { _amt: { $ne: 0 }, _cpAfm: { $nin: ["-", ownAfm] } } },
@@ -76,8 +74,8 @@ const hasField  = (path) => ({ $ne: [{ $ifNull: [path, null] }, null] });
 }}
 ```
 
-Τα φίλτρα (τύπος, ημερομηνία, ποσό, λέξη-κλειδί, αντισυμβαλλόμενος) μπαίνουν σε `$match` **πριν/μετά** τον υπολογισμό του `_amt` αναλόγως.
+Τα φίλτρα (τύπος, ημερομηνία, ποσό, λέξη-κλειδί, αντισυμβαλλόμενος) εφαρμόζονται με `$match` πριν ή μετά τον υπολογισμό του `_amt`, ανάλογα με το πεδίο.
 
 ## Αποτέλεσμα
 
-Ταυτόσημα νούμερα με την in-memory διαδρομή (δες [05](05-testing-offline.md)), χωρίς να φεύγει καμία πράξη από τη βάση προς το Node.
+Ταυτόσημα αποτελέσματα με την in-memory διαδρομή (βλ. [05](05-testing-offline.md)), χωρίς μεταφορά πράξεων από τη βάση στο Node.
